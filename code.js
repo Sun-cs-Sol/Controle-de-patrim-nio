@@ -1,594 +1,1279 @@
-//Aba onde estao os itens do patrimonio
-const SHEET_NAME = "Patrimonio";
-const cache = CacheService.getScriptCache();
-
-const STATUS_SHEET_NAME = "Status"; // Aba de controle
-const STATUS_CELL = "A2"; 
-const EDITOR_EMAIL_CELL = "B2"; 
-const CATEGORIA_OPTIONS_HEADER = "Opcoes_Categoria"; 
-const SETOR_OPTIONS_HEADER = "Opcoes_Setor";         
-const STATUSPROD_OPTIONS_HEADER = "Opcoes_StatusProduto"; 
-
-//usa os valores da aba status para popular os menus suspensos
-function getDropdownOptions() { //
-  try {
-    //confere a existencia da aba Status
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(STATUS_SHEET_NAME);
-    if (!sheet) {
-      throw new Error(`Aba "${STATUS_SHEET_NAME}" não encontrada.`);
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <base target="_top">
+  <title>Gestão de Patrimônio</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f0f2f5; }
+    .main-container { max-width: 96rem; padding: 1rem; }
+    .shadow-panel { box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); }
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); display: none; justify-content: center; align-items: center; z-index: 1000; }
+    th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
+    th { background-color: #f9fafb; font-weight: 600; }
+    tbody tr:hover { background-color: #f0f2f5; }
+    #statusIndicator {
+      transition: background-color 0.3s ease;
     }
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0].map(h => h.toString().trim());
+    select:disabled {
+      background-color: #e9ecef; 
+      cursor: not-allowed; 
+      opacity: 0.7; 
+    }
+  </style>
+</head>
+
+<body class="flex items-center justify-center min-h-screen">
+
+  <div id="confirmModal" class="modal-overlay">
+    <div class="bg-white p-8 rounded-lg text-center w-11/12 max-w-sm">
+      <p id="confirmMessage" class="text-lg mb-6"></p>
+      <div class="flex justify-center gap-4">
+        <button id="confirmYesBtn" class="bg-[#e70607] text-white font-medium py-2 px-6 rounded-lg hover:bg-red-700">Sim</button>
+        <button id="confirmNoBtn" class="bg-[#d9d9d9] text-gray-800 font-medium py-2 px-6 rounded-lg hover:bg-gray-400">Não</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="infoModal" class="modal-overlay">
+      <div class="bg-white p-8 rounded-lg text-center w-11/12 max-w-sm">
+          <p id="infoMessage" class="text-lg mb-6"></p>
+          <button id="infoOkBtn" class="bg-[#e70607] text-white font-medium py-2 px-8 rounded-lg hover:bg-red-700">OK</button>
+      </div>
+  </div>
+
+  <div id="historyModal" class="modal-overlay">
+      <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl mx-4 overflow-y-auto max-h-[90vh]">
+        <div class="flex justify-between items-center border-b pb-3 mb-4">
+          <h2 class="text-2xl font-bold text-gray-800">Histórico do Ativo</h2>
+          <button id="closeHistoryModalBtn" class="text-3xl text-gray-500 hover:text-gray-800 font-light leading-none">&times;</button>
+        </div>
+        <div class="mb-4">
+          <button id="showHistoryFormBtn" class="w-full bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600">
+            + Adicionar Movimentação
+          </button>
+        </div>
+        <form id="historyForm" class="hidden p-4 border rounded-lg bg-gray-50 mb-4 space-y-3">
+          <h3 class="text-lg font-semibold">Nova Movimentação</h3>
+          <input type="hidden" id="historyPatrimonyId">
+          <div>
+            <label for="historyData" class="block text-sm font-medium text-gray-700">Data</label>
+            <input type="datetime-local" id="historyData" class="mt-1 w-full border border-gray-300 rounded-md p-2">
+          </div>
+          <div>
+            <label for="historyTipo" class="block text-sm font-medium text-gray-700">Tipo de Evento</label>
+            <select id="historyTipo" class="mt-1 w-full border border-gray-300 rounded-md p-2">
+              <option value="Manutenção">Manutenção</option>
+              <option value="Desativação">Desativação</option>
+              <option value="Retorno">Retorno</option>
+              <option value="Movimentação">Movimentação</option>
+              <option value="Outro">Outro</option>
+            </select>
+          </div>
+          <div>
+            <label for="historyDescricao" class="block text-sm font-medium text-gray-700">Descrição</label>
+            <textarea id="historyDescricao" rows="2" class="mt-1 w-full border border-gray-300 rounded-md p-2" placeholder="Ex: Enviado para reparo..."></textarea>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label for="historyCusto" class="block text-sm font-medium text-gray-700">Custo (R$)</label>
+              <input type="number" id="historyCusto" step="0.01" class="mt-1 w-full border border-gray-300 rounded-md p-2" placeholder="0.00">
+            </div>
+            <div>
+              <label for="historyResponsavel" class="block text-sm font-medium text-gray-700">Responsável (email)</label>
+              <input type="text" id="historyResponsavel" class="mt-1 w-full border border-gray-300 rounded-md p-2" readonly>
+            </div>
+          </div>
+          <div class="flex justify-end gap-2">
+            <button type="button" id="cancelHistoryFormBtn" class="bg-gray-300 text-gray-800 py-2 px-4 rounded-lg">Cancelar</button>
+            <button type="submit" class="bg-blue-500 text-white font-bold py-2 px-4 rounded-lg">Salvar</button>
+          </div>
+        </form>
+        <div id="historyModalContent" class="space-y-3 max-h-[40vh] overflow-y-auto pr-2">
+          </div>
+      </div>
+  </div>
+
+  <div id="appContainer" class="main-container bg-white p-6 md:p-8 rounded-xl shadow-panel w-full">
+
+    <div id="loginScreen" class="flex flex-col items-center justify-center">
+        <img src="./logo-placeholder.png" alt="Logo" class="h-16 mb-6">
+        <h1 class="text-3xl font-bold text-gray-800 mb-4">Acessar Sistema</h1>
+        <div class="w-full max-w-sm">
+          <div class="mb-4">
+            <input type="email" id="emailInput" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#e70607]" placeholder="seu-email@dominio.com">
+          </div>
+          <div class="mb-6">
+            <input type="password" id="passwordInput" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-[#e70607]" placeholder="Senha">
+          </div>
+          <button id="loginBtn" class="w-full bg-[#e70607] text-white font-bold py-3 px-4 rounded-lg hover:bg-red-700 transition-colors">Entrar</button>
+          <p id="loginMessage" class="mt-4 text-red-600 text-center font-medium"></p>
+        </div>
+    </div>
+
+    <div id="mainContent" class="hidden">
+      <header class="flex flex-col md:flex-row justify-between items-center mb-6 border-b pb-4">
+        <div class="flex items-center gap-4">
+            <img src="./logo-placeholder.png" alt="Logo"  class="h-10">
+            <div id="navigation" class="flex gap-2 border border-gray-200 rounded-lg p-1">
+                <button data-view="patrimonio" class="nav-btn bg-[#e70607] text-white font-semibold py-2 px-4 rounded-md text-sm">Patrimônio</button>
+                <button data-view="dashboard" class="nav-btn bg-transparent text-gray-600 font-semibold py-2 px-4 rounded-md text-sm hover:bg-gray-100">Dashboard</button>
+            </div>
+        </div>
+        <div class="flex items-center gap-4 mt-4 md:mt-0">
+            <div class="flex items-center gap-2" title="Status da sincronização dos dados">
+              <div id="statusIndicator" class="w-3 h-3 bg-gray-400 rounded-full animate-pulse"></div> 
+              <span id="statusText" class="text-sm text-gray-600">Verificando...</span>
+              <button id="manualRefreshBtn" class="hidden ml-1 bg-blue-500 text-white text-xs font-bold py-1 px-2 rounded hover:bg-blue-600">
+                Atualizar
+              </button>
+            </div>
+            <p class="text-gray-700 border-l pl-4">Bem-vindo, <span id="userRole" class="font-bold"></span></p>
+            <button id="logoutBtn" class="bg-[#d9d9d9] text-gray-800 font-medium py-2 px-4 rounded-lg hover:bg-gray-400">Sair</button>
+        </div>
+      </header>
+
+      <div id="patrimonioView">
+
+        <div id="itemFormModal" class="modal-overlay">
+          <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl mx-4 overflow-y-auto max-h-[90vh]">
+            <h2 id="formTitle" class="text-2xl font-bold mb-6">Adicionar Item</h2>
+            <form id="itemForm">
+              <input type="hidden" id="itemId">
+              
+              <div id="formFieldsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                
+                <div>
+                  <label for="item-categoria" class="block text-sm font-medium text-gray-700">Categoria</label>
+                  <select id="item-categoria" name="categoria" class="mt-1 w-full border border-gray-300 rounded-md p-2" required>
+                    <option value="" disabled selected>-- Selecione --</option>
+                    </select>
+                </div>
+                <div>
+                  <label for="item-nome" class="block text-sm font-medium text-gray-700">Nome do Item</label>
+                  <input type="text" id="item-nome" name="nome" class="mt-1 w-full border border-gray-300 rounded-md p-2" required>
+                </div>
+                <div>
+                  <label for="item-responsavel" class="block text-sm font-medium text-gray-700">Responsável</label>
+                  <input type="text" id="item-responsavel" name="responsavel" class="mt-1 w-full border border-gray-300 rounded-md p-2">
+                </div>
+                <div>
+                  <label for="item-setor" class="block text-sm font-medium text-gray-700">Setor</label>
+                  <select id="item-setor" name="setor" class="mt-1 w-full border border-gray-300 rounded-md p-2">
+                    <option value="" disabled selected>-- Selecione --</option>
+                     </select>
+                </div>
+
+                <div>
+                  <label for="item-statusdoproduto" class="block text-sm font-medium text-gray-700">Status do Produto</label>
+                   <select id="item-statusdoproduto" name="status do produto" class="mt-1 w-full border border-gray-300 rounded-md p-2">
+                    <option value="" disabled selected>-- Selecione --</option>
+                     </select>
+                </div>
+                <div>
+                  <label for="item-patrimonio" class="block text-sm font-medium text-gray-700">Número de Patrimônio</label>
+                  <input type="text" id="item-patrimonio" name="patrimonio" class="mt-1 w-full border border-gray-300 rounded-md p-2">
+                </div>
+                <div>
+                  <label for="item-datadeentrada" class="block text-sm font-medium text-gray-700">Data de Entrada</label>
+                  <input type="date" id="item-datadeentrada" name="data de entrada" class="mt-1 w-full border border-gray-300 rounded-md p-2">
+                </div>
+                <div>
+                  <label for="item-valorunitario" class="block text-sm font-medium text-gray-700">Valor Unitário (R$)</label>
+                  <input type="text" id="item-valorunitario" name="valor unitario" class="mt-1 w-full border border-gray-300 rounded-md p-2" placeholder="0,00">
+                </div>
+
+              </div>
+              
+              <div class="flex justify-end space-x-4 mt-8">
+                <button type="button" id="cancelFormBtn" class="bg-[#d9d9d9] text-gray-800 py-2 px-4 rounded-lg hover:bg-gray-400">Cancelar</button>
+                <button type="submit" class="bg-[#e70607] text-white font-bold py-2 px-4 rounded-lg hover:bg-red-700">Salvar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div id="filterModal" class="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center hidden z-50">
+          <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg mx-2 overflow-y-auto max-h-[90vh]">
+            <h2 class="text-2xl font-bold mb-6">Filtros Avançados</h2>
+            <form id="filterForm" class="space-y-4">
+              <div>
+                <label class="block text-gray-700 font-medium mb-1">ID do Item</label>
+                <input type="text" id="idFiltro" class="w-full px-3 py-2 border rounded-lg" placeholder="Digite o ID exato">
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-gray-700 font-medium mb-1">Data de Entrada (de)</label>
+                  <input type="date" id="dataInicio" class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                <div>
+                  <label class="block text-gray-700 font-medium mb-1">Data de Entrada (até)</label>
+                  <input type="date" id="dataFim" class="w-full px-3 py-2 border rounded-lg">
+                </div>
+              </div>
+              <div>
+                <label class="block text-gray-700 font-medium mb-1">Categoria</label>
+                <select id="categoriaFiltro" class="w-full px-3 py-2 border rounded-lg">
+                  <option value="">Todas</option>
+                  </select>
+              </div>
+              <div>
+                <label class="block text-gray-700 font-medium mb-1">Setor</label>
+                <select id="setorFiltro" class="w-full px-3 py-2 border rounded-lg">
+                  <option value="">Todos</option>
+                  </select>
+              </div>
+              <div>
+                <label class="block text-gray-700 font-medium mb-1">Status do Produto</label>
+                <select id="statusFiltro" class="w-full px-3 py-2 border rounded-lg">
+                  <option value="">Todos</option>
+                  </select>
+              </div>
+              <div>
+                <label class="block text-gray-700 font-medium mb-1">Responsável</label>
+                <input type="text" id="responsavelFiltro" class="w-full px-3 py-2 border rounded-lg" placeholder="Digite o nome do responsável">
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-gray-700 font-medium mb-1">Valor Unitário (mín)</label>
+                  <input type="number" id="valorMin" class="w-full px-3 py-2 border rounded-lg" placeholder="ex: 1000.50">
+                </div>
+                <div>
+                  <label class="block text-gray-700 font-medium mb-1">Valor Unitário (máx)</label>
+                  <input type="number" id="valorMax" class="w-full px-3 py-2 border rounded-lg" placeholder="ex: 5000">
+                </div>
+              </div>
+              <div class="flex justify-end space-x-4 mt-6">
+                <button type="button" id="cancelFilterBtn" class="bg-gray-300 text-gray-800 py-2 px-4 rounded-lg hover:bg-gray-400">Cancelar</button>
+                <button type="button" id="clearFilterBtn" class="bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600">Limpar</button>
+                <button type="submit" class="bg-teal-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-teal-600">Aplicar Filtros</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div id="itemsSection">
+          <div class="mb-6 flex flex-col sm:flex-row items-center gap-4">
+            <input type="text" id="searchInput" class="w-full px-4 py-2 border rounded-lg text-lg" placeholder="Pesquisar em todo o inventário...">
+            <button id="filterBtn" class="w-full sm:w-auto bg-gray-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-gray-600">
+              Filtros
+            </button>
+            <div id="editorActions">
+              <button id="addItemBtn" class="w-full sm:w-auto bg-[#e70607] text-white font-bold py-2 px-5 rounded-lg hover:bg-red-700">
+                Adicionar Item
+              </button>
+            </div>
+            <button id="printPdfBtn" class="w-full sm:w-auto bg-gray-700 text-white font-bold py-2 px-4 rounded-lg hover:bg-gray-800">
+              Imprimir PDF
+            </button>
+          </div>
+          <p id="itemsCountMessage" class="text-sm text-gray-600 mb-2"></p>
+          <div id="itemsList" class="overflow-x-auto bg-white rounded-lg shadow-panel">
+             <table class="w-full min-w-[1200px]">
+                <thead id="itemsTableHeader"></thead>
+                <tbody id="itemsTableBody"></tbody>
+             </table>
+          </div>
+          <div id="noItemsMessage" class="text-center text-gray-500 text-lg mt-8 hidden"></div>
+          <div id="inventoryTotalValue" class="text-xl font-bold text-right mt-4 p-4 bg-gray-100 rounded-lg">
+            Valor Total (Filtrado): R$ 0,00
+          </div>
+        </div>
+      </div>
+
+      <div id="dashboardView" class="hidden">
+        <div class="flex justify-between items-center mb-6">
+          <h2 class="text-2xl font-bold">Dashboard de Ativos</h2>
+          <button id="reloadDashboardBtn" class="bg-[#e70607] text-white font-medium py-2 px-4 rounded-lg hover:bg-red-700">
+            Atualizar
+          </button>
+        </div>
+        <div id="dashboardSummaryCards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8"></div>
+        <div id="dashboardFilters" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8 p-4 bg-gray-50 rounded-lg border"></div>
+        <div id="dashboardCharts" class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div class="bg-white p-4 rounded-lg shadow-panel"><canvas id="setorChart"></canvas></div>
+            <div class="bg-white p-4 rounded-lg shadow-panel"><canvas id="categoryChart"></canvas></div>
+            <div class="bg-white p-4 rounded-lg shadow-panel"><canvas id="statusChart"></canvas></div>
+            <div class="bg-white p-4 rounded-lg shadow-panel"><canvas id="nameChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+Chart.register(ChartDataLabels);
+Chart.defaults.plugins.datalabels.color = '#fff';
+Chart.defaults.plugins.datalabels.font = { weight: 'bold' };
+Chart.defaults.plugins.datalabels.formatter = (value) => value;
+
+
+document.addEventListener('DOMContentLoaded', () => {
+    const server = google.script.run;
+    let currentUserRole = 'Leitor';
+    let currentUserEmail = ''; 
+    let allItemsData = [];
+    let currentFilteredData = [];
+    let charts = {};
+    let pollingInterval; 
+    let dropdownOptions = { categorias: [], setores: [], statusProduto: [] }; 
+    let isEditing = false; // Flag global de edição
+
+    const loginScreen = document.getElementById('loginScreen');
+    const mainContent = document.getElementById('mainContent');
+    const loginBtn = document.getElementById('loginBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const emailInput = document.getElementById('emailInput');
+    const passwordInput = document.getElementById('passwordInput');
+    const loginMessage = document.getElementById('loginMessage');
+    const userRoleSpan = document.getElementById('userRole');
+    const editorActions = document.getElementById('editorActions');
+    const addItemBtn = document.getElementById('addItemBtn');
+    const itemFormModal = document.getElementById('itemFormModal');
+    const itemForm = document.getElementById('itemForm');
+    const formTitle = document.getElementById('formTitle');
+    const itemIdInput = document.getElementById('itemId');
+    const cancelFormBtn = document.getElementById('cancelFormBtn');
+    const itemsSection = document.getElementById('itemsSection');
+    const searchInput = document.getElementById('searchInput');
+    const itemsList = document.getElementById('itemsList');
+    const itemsTableHeader = document.getElementById('itemsTableHeader');
+    const itemsTableBody = document.getElementById('itemsTableBody');
+    const itemsCountMessage = document.getElementById('itemsCountMessage');
+    const noItemsMessage = document.getElementById('noItemsMessage');
+    const confirmModal = document.getElementById('confirmModal');
+    const infoModal = document.getElementById('infoModal');
+    const infoOkBtn = document.getElementById('infoOkBtn');
+    const navigation = document.getElementById('navigation');
+    const patrimonioView = document.getElementById('patrimonioView');
+    const dashboardView = document.getElementById('dashboardView');
+    const filterBtn = document.getElementById('filterBtn');
+    const filterModal = document.getElementById('filterModal');
+    const cancelFilterBtn = document.getElementById('cancelFilterBtn');
+    const filterForm = document.getElementById('filterForm');
+    const clearFilterBtn = document.getElementById('clearFilterBtn');
+    const printPdfBtn = document.getElementById('printPdfBtn');
+    const inventoryTotalValue = document.getElementById('inventoryTotalValue'); 
+    const historyModal = document.getElementById('historyModal');
+    const closeHistoryModalBtn = document.getElementById('closeHistoryModalBtn');
+    const historyModalContent = document.getElementById('historyModalContent');
+    const showHistoryFormBtn = document.getElementById('showHistoryFormBtn');
+    const historyForm = document.getElementById('historyForm');
+    const cancelHistoryFormBtn = document.getElementById('cancelHistoryFormBtn');
+    const historyPatrimonyId = document.getElementById('historyPatrimonyId');
+    const statusIndicator = document.getElementById('statusIndicator'); 
+    const statusText = document.getElementById('statusText'); 
+    const manualRefreshBtn = document.getElementById('manualRefreshBtn'); 
+
+    const ITEM_COLUMNS = [
+      'id', 'categoria', 'nome', 'responsavel', 'setor', 'status do produto', 'patrimonio', 'data de entrada', 'valor unitario'
+    ];
+    const TABLE_COLUMNS = [
+      { key: 'id', label: 'ID' },
+      { key: 'nome', label: 'Nome' },
+      { key: 'categoria', label: 'Categoria' },
+      { key: 'patrimonio', label: 'Patrimônio' },
+      { key: 'responsavel', label: 'Responsável' },
+      { key: 'setor', label: 'Setor' },
+      { key: 'status do produto', label: 'Status' },
+      { key: 'valor unitario', label: 'Valor', format: 'currency' },
+      { key: 'data de entrada', label: 'Data Entrada', format: 'date' },
+      { key: 'actions', label: 'Ações' }
+    ];
+
+    function showInfoModal(message) {
+        infoMessage.textContent = message;
+        infoModal.style.display = 'flex';
+    }
+    infoOkBtn.addEventListener('click', () => infoModal.style.display = 'none');
     
-    const catColIndex = headers.indexOf(CATEGORIA_OPTIONS_HEADER); //opçoes de categoria
-    const setColIndex = headers.indexOf(SETOR_OPTIONS_HEADER); // opçoes de setor
-    const staColIndex = headers.indexOf(STATUSPROD_OPTIONS_HEADER); //opçoes de status do produto
-
-    const options = {
-      categorias: [],
-      setores: [],
-      statusProduto: []
-    };
-
-    // Mensagens caso de erro
-    if (catColIndex === -1) Logger.log(`Aviso: Coluna "${CATEGORIA_OPTIONS_HEADER}" não encontrada na aba Status.`);
-    if (setColIndex === -1) Logger.log(`Aviso: Coluna "${SETOR_OPTIONS_HEADER}" não encontrada na aba Status.`);
-    if (staColIndex === -1) Logger.log(`Aviso: Coluna "${STATUSPROD_OPTIONS_HEADER}" não encontrada na aba Status.`);
-
-    for (let i = 1; i < data.length; i++) {
-      if (catColIndex !== -1 && data[i][catColIndex] && data[i][catColIndex].toString().trim() !== "") {
-        options.categorias.push(data[i][catColIndex].toString().trim());
+    function parseCurrency(valueStr) {
+      if (!valueStr) return 0;
+      let cleanStr = String(valueStr).replace(/[^\d,.]/g, '');
+      const lastComma = cleanStr.lastIndexOf(',');
+      const lastPeriod = cleanStr.lastIndexOf('.');
+      if (lastComma > lastPeriod) {
+        cleanStr = cleanStr.replace(/\./g, '').replace(',', '.');
+      } else {
+        cleanStr = cleanStr.replace(/,/g, '');
       }
-      if (setColIndex !== -1 && data[i][setColIndex] && data[i][setColIndex].toString().trim() !== "") {
-        options.setores.push(data[i][setColIndex].toString().trim());
-      }
-      if (staColIndex !== -1 && data[i][staColIndex] && data[i][staColIndex].toString().trim() !== "") {
-        options.statusProduto.push(data[i][staColIndex].toString().trim());
-      }
+      const value = parseFloat(cleanStr);
+      return isNaN(value) ? 0 : value;
+    }
+
+    function formatCurrency(value) {
+        if (isNaN(value)) return "R$ --";
+        return new Intl.NumberFormat('pt-BR', {
+            style: 'currency',
+            currency: 'BRL'
+        }).format(value);
+    }
+    function formatInputToBRReal(input) {
+      let v = String(input).replace(/[^0-9]/g, '');
+      if (v.length === 0) return '';
+      if (v.length === 1) return '0,0' + v;
+      if (v.length === 2) return '0,' + v;
+      const intPart = v.slice(0, -2).replace(/^0+/, '') || '0';
+      const decPart = v.slice(-2);
+      return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + decPart;
     }
     
-    //ordena
-    options.categorias.sort();
-    options.setores.sort();
-    options.statusProduto.sort();
-
+    function formatDate(dateStr) {
+      if (!dateStr) return '--';
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return dateStr;
+      date.setDate(date.getDate() + 1); 
+      return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+    }
     
-    return { success: true, options: options };
+ 
+    function populateDropdown(selectElementId, optionsArray) { 
+        const selectElement = document.getElementById(selectElementId);
+        if (!selectElement) return;
 
-  } catch (e) {
-    Logger.log("Erro ao buscar opções de dropdown: " + e.message);
-    return { success: false, message: e.message, options: { categorias: [], setores: [], statusProduto: [] } };
-  }
-}
+        const currentValue = selectElement.value;
+        const placeholder = selectElement.querySelector('option[value=""]');
 
-
-function _setDirtyFlag(userEmail = 'Sistema') { 
-  try {
-    // detecta mudanças na planilha e troca os valores na aba Status para ativar o sistema de sinconização
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(STATUS_SHEET_NAME);
-    sheet.getRange(STATUS_CELL + ":" + EDITOR_EMAIL_CELL).setValues([[1, userEmail]]); 
-  } catch (e) {
-    Logger.log("Erro ao setar dirty flag: " + e.message);
-  }
-}
-
-//Procura o status da dirty flag na aba Status para saber se esta desatualizado
-function getDirtyFlagStatus() { 
-  try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(STATUS_SHEET_NAME);
-    const data = sheet.getRange(STATUS_CELL + ":" + EDITOR_EMAIL_CELL).getValues(); 
-    const status = data[0][0]; // 0 ou 1
-    const lastEditor = data[0][1]; // Pessoa que editou
-    return { status: status, lastEditor: lastEditor }; 
-  } catch (e) {
-    Logger.log("Erro ao ler dirty flag: " + e.message);
-    return { status: 0, lastEditor: "" }; 
-  }
-}
-
-//Quando alguem atualizar o botao de sincronizar, ele seta 0 e apaga o nome de quem editou por ultimo
-function resetDirtyFlag() { 
-  try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(STATUS_SHEET_NAME);
-    sheet.getRange(STATUS_CELL + ":" + EDITOR_EMAIL_CELL).setValues([[0, ""]]); 
-    return { success: true };
-  } catch (e) {
-    Logger.log(`Erro ao resetar dirty flag: ${e.message}`); 
-    return { success: false, message: e.message };
-  }
-}
-
-
-//funcao pra bloquear edições simultaneas
-function acquireEditLock(itemId, userEmail) {
-    // guarda o id do item que esta seno editado
-  const lockKey = 'lock_' + itemId;
-  try {
-
-    const currentLock = cache.get(lockKey);
-    //se a pessoa que esta editando for diferente de quem esta editando, retorna que espere para editar e bloqueia a ação
-    if (currentLock && currentLock !== userEmail) {
-      return { success: false, message: 'Este item está sendo editado por: ' + currentLock + ". Tente novamente em alguns minutos." };
-    }
-    //aguarda 30 segundos para liberar o lock
-    cache.put(lockKey, userEmail, 300); 
-    return { success: true };
-  } catch (e) {
-    return { success: false, message: 'Erro de servidor ao tentar travar o item: ' + e.message };
-  }
-}
-
-//libera a trava de edição
-function releaseEditLock(itemId, userEmail) {
-  const lockKey = 'lock_' + itemId;
-  try {
-    const currentLock = cache.get(lockKey);
-    //Se for igual ele libera
-    if (currentLock === userEmail) {
-      cache.remove(lockKey);
-    }
-    return { success: true };
-  } catch (e) {
-    return { success: false, message: 'Erro ao liberar trava: ' + e.message };
-  }
-}
-
-
-
-//função que carrega a página inicial do app
-function doGet() {
-  return HtmlService.createTemplateFromFile("index")
-    .evaluate()
-    .setTitle("Gestão de Patrimônio")
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
-
-
-function onEdit(e) {
-  const editedSheetName = e.range.getSheet().getName();
-  //verifica se a edição foi na aba de status, se for ele nao faz nada
-  if (editedSheetName === STATUS_SHEET_NAME) {
-     return; 
-  }
-  //se for em outra aba ele marca como ediçao e ativa o sistema de sincronização
-  clearDashboardCache();
-  _setDirtyFlag('Edição Manual'); 
-}
-
-//processa o login
-function handleLogin(email, password) {
-  try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Usuarios"); // procura pela aba de usuários no arquivo
-    if (!sheet) return { success: false, message: 'Erro crítico: Planilha de usuários não configurada.' };
-    
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0].map(h => h.toLowerCase().trim());
-    //pega as colunas de email, senha e nivel
-    const emailIndex = headers.indexOf('email');
-    const passwordIndex = headers.indexOf('senha');
-    const levelIndex = headers.indexOf('nivel');
-
-    if (emailIndex === -1 || passwordIndex === -1 || levelIndex === -1) {
-        return { success: false, message: 'Configuração da planilha de usuários está incorreta.' };
-    }
-
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      if (row[emailIndex].toLowerCase() === email.toLowerCase() && row[passwordIndex] === password) {
-        return { success: true, message: "Login bem-sucedido!", role: row[levelIndex] };
-      }
-    }
-    return { success: false, message: "Usuário ou senha inválidos." };
-  } catch (e) {
-    return { success: false, message: `Ocorreu um erro no servidor: ${e.message}` };
-  }
-}
-
-function clearDashboardCache() {
-  cache.remove('dashboard_data');
-  return { success: true, message: "Cache limpo." };
-}
-
-//logica para gerar o próximo ID baseado na categoria
-function getNextIdForCategory(sheet, category) {
-    // Define os prefixos para cada categoria prara o ID e que se quiser adicionar outras categorias e pra adicionar aqui
-  const CATEGORY_PREFIXES = {
-    'TI': '1',
-    'Mobiliário': '2',
-    'Equipamentos Eletrônicos': '3'
-  };
-  const prefix = CATEGORY_PREFIXES[category] || '9'; 
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 2) { 
-    //gera o primero id de uma categoria
-    return prefix + "01"; 
-  }
-
-  const headers = data[0].map(h => h.toString().toLowerCase().trim());
-  const idIndex = headers.indexOf("id");
-  const categoryIndex = headers.indexOf("categoria");
-  if (idIndex === -1 || categoryIndex === -1) {
-    throw new Error("Planilha 'Patrimonio' deve conter colunas 'ID' e 'Categoria'.");
-  }
-  let maxSeq = 0;
-  for (let i = 1; i < data.length; i++) {
-    const rowCategory = data[i][categoryIndex];
-    const rowId = data[i][idIndex] ? data[i][idIndex].toString() : "";
-    if (rowCategory === category && rowId.startsWith(prefix)) {
-      const seq = parseInt(rowId.substring(prefix.length), 10);
-      if (seq > maxSeq) {
-        maxSeq = seq;
-      }
-    }
-  }
-  //ve o maior id da categoria e adiciona 1
-  const nextSeq = (maxSeq + 1).toString().padStart(2, '0');
-  return prefix + nextSeq; //retorna o proximo id
-}
-
-
-//funcao de adicionar item
-function addItem(item, userEmail) { 
-  try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-    if (!sheet) return { success: false, message: `Planilha "${SHEET_NAME}" não encontrada.` };
-
-    // cria o id pra categoria
-    item.id = getNextIdForCategory(sheet, item.categoria);
-
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const normalizedHeaders = headers.map(h => h.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g,""));
-    
-    const newRow = [];
-    for (const header of normalizedHeaders) {
-      newRow.push(item[header] || "");
-    }
-
-    sheet.appendRow(newRow);
-    clearDashboardCache();
-    _setDirtyFlag(userEmail); 
-    return { success: true, message: "Item adicionado com sucesso.", newItem: item };
-  } catch (e) {
-    Logger.log(`Erro em addItem: ${e.message}`); 
-    return { success: false, message: `Erro ao adicionar item: ${e.message}` };
-  }
-}
-
-//gera as descrições das mudanças feitas no item quando editados
-function generateChangesDescription(oldItem, newItem, headers) {
-  let changes = [];
-  const specialFormatting = {
-    'valor unitario': (v) => parseFloat(v || 0).toFixed(2)
-  };
-  for (const key of headers) {
-    if (key === 'id' || key === 'categoria') continue;  // nao serao mudados a categoria e o item
-    const formatter = specialFormatting[key] || ((v) => (v || "").toString().trim());
-    const oldValue = formatter(oldItem[key]);
-    const newValue = formatter(newItem[key]);
-    if (oldValue !== newValue) {
-        //cri a a descrição da mudança
-      const fieldName = key.charAt(0).toUpperCase() + key.slice(1);
-      changes.push(`${fieldName} alterado de '${oldValue || "vazio"}' para '${newValue || "vazio"}'`);
-    }
-  }
-  return changes.join('; ');
-}
-
-function editItem(item, userEmail = 'Sistema') {
-//edita o item na planilha
-  try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-    if (!sheet) return { success: false, message: `Planilha "${SHEET_NAME}" não encontrada.` };
-
-    const range = sheet.getDataRange();
-    const data = range.getValues();
-    const headers = data[0].map(h => h.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g,""));
-    const idIndex = headers.indexOf('id');
-    const catIndex = headers.indexOf('categoria'); 
-
-    if (idIndex === -1) return { success: false, message: "Coluna 'ID' não encontrada." };
-    if (catIndex === -1) return { success: false, message: "Coluna 'Categoria' não encontrada." };
-
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][idIndex] && data[i][idIndex].toString() === item.id.toString()) {
+        selectElement.innerHTML = ''; 
         
-        const oldRowData = data[i];
-        const oldItem = {};
-        headers.forEach((h, j) => {
-          let cellValue = oldRowData[j]; 
-          if (cellValue instanceof Date) {
-            cellValue = Utilities.formatDate(cellValue, Session.getScriptTimeZone(), "yyyy-MM-dd");
-          }
-          oldItem[h] = cellValue !== undefined ? cellValue.toString() : "";
-        });
-
-       
-        item.categoria = oldRowData[catIndex]; 
-
-        const itemInSheetOrder = headers.map(header => item[header] || "");
-
-        sheet.getRange(i + 1, 1, 1, headers.length).setValues([itemInSheetOrder]);
-        clearDashboardCache();
-
-        const changesDescription = generateChangesDescription(oldItem, item, headers);
-        //cria o histórico se houver mudança de edicao
-        if (changesDescription) {
-          const historyEntry = {
-            id: item.id,
-            data: new Date(),
-            tipo: 'Edição',
-            descricao: changesDescription,
-            custo: 0, 
-            responsavel: userEmail
-          };
-          addHistoryEntry(historyEntry, userEmail); 
+        if (placeholder) {
+            selectElement.appendChild(placeholder.cloneNode(true));
         } else {
-          _setDirtyFlag(userEmail); 
+             const defaultPlaceholder = document.createElement('option');
+             defaultPlaceholder.value = "";
+             
+             if (selectElementId.includes('Filtro')) {
+                defaultPlaceholder.textContent = "Todas";
+                defaultPlaceholder.disabled = false; 
+             } else {
+                defaultPlaceholder.textContent = "-- Selecione --";
+                defaultPlaceholder.disabled = true;
+             }
+             selectElement.appendChild(defaultPlaceholder);
         }
 
-        return { success: true, message: "Item atualizado com sucesso." };
-      }
-    }
-    return { success: false, message: "Item não encontrado." };
-  } catch (e) {
-    Logger.log(`Erro em editItem: ${e.message}`); 
-    return { success: false, message: `Erro ao editar item: ${e.message}` };
-  }
-}
-
-//função para deletar item
-function deleteItem(id, userEmail) { 
-  try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-    if (!sheet) return { success: false, message: `Planilha "${SHEET_NAME}" não encontrada.` };
-
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0].map(h => h.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g,""));
-    const idIndex = headers.indexOf('id');
-    
-    if (idIndex === -1) return { success: false, message: "Coluna 'ID' não encontrada." };
-
-    for (let i = data.length - 1; i >= 1; i--) {
-      if (data[i][idIndex] && data[i][idIndex].toString() === id.toString()) {
-        sheet.deleteRow(i + 1);
-        clearDashboardCache();
-        _setDirtyFlag(userEmail); 
-        return { success: true, message: "Item excluído com sucesso." };
-      }
-    }
-    return { success: false, message: "Item não encontrado." };
-  } catch (e) {
-    Logger.log(`Erro em deleteItem: ${e.message}`); 
-    return { success: false, message: `Erro ao deletar item: ${e.message}` };
-  }
-}
-
-//procura o item pelo id
-function getItemById(id) {
-  try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-    if (!sheet) return { success: false, message: `Planilha "${SHEET_NAME}" não encontrada.` };
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return { success: false, message: "Planilha está vazia." };
-    const headers = data[0].map(h => h.toString().toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
-    const idIndex = headers.indexOf("id");
-    if (idIndex === -1) return { success: false, message: "Coluna 'ID' não encontrada." };
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      if (row[idIndex] && row[idIndex].toString() === id.toString()) {
-        const item = {};
-        headers.forEach((h, j) => {
-          if (h) {
-            let cellValue = row[j]; 
-            if (cellValue instanceof Date) {
-              cellValue = Utilities.formatDate(cellValue, Session.getScriptTimeZone(), "yyyy-MM-dd");
-            }
-            item[h] = cellValue !== undefined ? cellValue : "";
-          }
+        optionsArray.forEach(optionText => {
+            const option = document.createElement('option');
+            option.value = optionText;
+            option.textContent = optionText;
+            selectElement.appendChild(option);
         });
-        return { success: true, item: item };
+
+        if (optionsArray.includes(currentValue)) {
+            selectElement.value = currentValue;
+        } else {
+             selectElement.value = ""; 
+        }
+    }
+
+
+    function renderItemsTable(items) {
+      itemsTableBody.innerHTML = '';
+      itemsTableHeader.innerHTML = `
+        <tr>
+          ${TABLE_COLUMNS.map(col => `<th>${col.label}</th>`).join('')}
+        </tr>
+      `;
+      if (items.length === 0) {
+          noItemsMessage.textContent = "Nenhum item encontrado para a sua busca.";
+          noItemsMessage.classList.remove('hidden');
+          itemsList.classList.add('hidden');
+          itemsCountMessage.textContent = "0 itens encontrados.";
+          inventoryTotalValue.textContent = "Valor Total (Filtrado): R$ 0,00"; 
+          return;
       }
-    }
-    return { success: false, message: "Item não encontrado." };
-  } catch (e) {
-    return { success: false, message: `Erro ao buscar item: ${e.message}` };
-  }
-}
-
-//função que carrega os dados do dashboard
-
-function getDashboardData(forceReload = false) {
-  const cache = CacheService.getScriptCache();
-  if (!forceReload) {
-    const cached = cache.get('dashboard_data');
-    if (cached != null) {
-      return { success: true, data: JSON.parse(cached), source: 'cache' };
-    }
-  }
-  try {
-    const allItems = [];
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(SHEET_NAME);
-    if (sheet) {
-      const lastRow = sheet.getLastRow();
-      if (lastRow > 1) { 
-        const data = sheet.getDataRange().getValues();
-        const headers = data[0].map(h => {
-          if (!h) return "";
-          return h.toString().toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        });
-        const rows = data.slice(1);
-        rows.forEach(row => {
-          if (row.every(cell => cell === "" || cell === null)) return;
-          let obj = {};
-          headers.forEach((h, i) => {
-            if (h) {
-              let cellValue = row[i];
-              if (cellValue instanceof Date) {
-                cellValue = Utilities.formatDate(cellValue, Session.getScriptTimeZone(), "yyyy-MM-dd");
-              }
-              obj[h] = cellValue;
+      noItemsMessage.classList.add('hidden');
+      itemsList.classList.remove('hidden');
+      itemsCountMessage.textContent = `${items.length} itens encontrados.`;
+      let totalValue = 0; 
+      items.forEach(item => {
+          const tr = document.createElement('tr');
+          totalValue += parseCurrency(item['valor unitario']); 
+          let cells = '';
+          TABLE_COLUMNS.forEach(col => {
+            if (col.key === 'actions') {
+              cells += `<td class="flex gap-2 py-2">
+                <button data-id="${item.id}" class="history-btn text-blue-600 hover:text-blue-800 text-sm font-medium">Histórico</button>
+                ${ (currentUserRole === 'Administrador' || currentUserRole === 'Editor') ? `
+                  <button data-id="${item.id}" class="edit-btn text-yellow-600 hover:text-yellow-800 text-sm font-medium">Editar</button>
+                ` : ''}
+                ${ currentUserRole === 'Administrador' ? `
+                  <button data-id="${item.id}" class="delete-btn text-red-600 hover:text-red-800 text-sm font-medium">Excluir</button>
+                ` : ''}
+              </td>`;
+            } else {
+              let value = item[col.key] || '--';
+              if (col.format === 'currency') value = formatCurrency(parseCurrency(value));
+              if (col.format === 'date') value = formatDate(value);
+              cells += `<td class="text-sm text-gray-700">${value}</td>`;
             }
           });
-          allItems.push(obj);
-        });
-      }
-    } else {
-      Logger.log(`Aviso: A planilha '${SHEET_NAME}' não foi encontrada.`);
-      return { success: false, message: `Planilha principal '${SHEET_NAME}' não encontrada.` };
-    }
-    cache.put('dashboard_data', JSON.stringify(allItems), 3600); 
-    return { success: true, data: allItems, source: 'spreadsheet' };
-  } catch (e) {
-    Logger.log(`Erro em getDashboardData: ${e.message}`);
-    return { success: false, message: e.message };
-  }
-}
-
-//gera o relatorio em pdf
-function generatePdfReport(filteredData, tableColumns, logoUrl) {
-  try {
-    let folder;
-    const folders = DriveApp.getFoldersByName("Relatorios_Patrimonio");
-    folder = folders.hasNext() ? folders.next() : DriveApp.createFolder("Relatorios_Patrimonio");
-    const docName = `Relatorio_Patrimonio_${new Date().toISOString().split('T')[0]}`;
-    const doc = DocumentApp.create(docName);
-    const body = doc.getBody();
-    body.setMarginLeft(20);
-    body.setMarginRight(20);
-    body.setMarginTop(30);
-    body.setMarginBottom(30);
-    if (logoUrl) {
-      try {
-        const response = UrlFetchApp.fetch(logoUrl);
-        const imgBlob = response.getBlob();
-        const image = body.insertImage(0, imgBlob);
-        image.setWidth(200);
-      } catch (e) {
-        Logger.log("Falha ao inserir logo: " + e.message);
-      }
-    }
-    const title = body.appendParagraph(docName);
-    title.setHeading(DocumentApp.ParagraphHeading.HEADING1);
-    title.setFontSize(12);
-    body.appendParagraph(`Gerado em: ${new Date().toLocaleString('pt-BR')}`).setFontSize(8);
-    body.appendParagraph(`Total de itens: ${filteredData.length}`).setFontSize(8);
-    const headers = tableColumns.filter(c => c.key !== 'actions').map(c => c.label);
-    const keys = tableColumns.filter(c => c.key !== 'actions').map(c => c.key);
-    const tableData = [headers];
-    let totalValue = 0;
-    filteredData.forEach(item => {
-      const row = [];
-      keys.forEach(key => {
-        let value = item[key] || '--';
-        const colFormat = tableColumns.find(c => c.key === key)?.format;
-        if (colFormat === 'currency') {
-          const num = parseFloat(String(value).replace(/[^\d,.-]/g, '').replace(',', '.')) || 0;
-          totalValue += num;
-          value = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(num);
-        }
-        if (colFormat === 'date' && value) {
-          const date = new Date(value);
-          if (!isNaN(date)) value = date.toLocaleDateString('pt-BR');
-        }
-        row.push(String(value));
+          tr.innerHTML = cells;
+          itemsTableBody.appendChild(tr);
       });
-      tableData.push(row);
-    });
-    const table = body.appendTable(tableData);
-    const pageWidth = body.getPageWidth() - body.getMarginLeft() - body.getMarginRight();
-    try { table.setWidth(pageWidth); } catch (_) {}
-    const headerRow = table.getRow(0);
-    for (let c = 0; c < headerRow.getNumCells(); c++) {
-      const cell = headerRow.getCell(c);
-      cell.setBackgroundColor("#CCCCCC");
-      const p = cell.getChild(0).asParagraph();
-      p.setFontSize(8).setBold(true).setSpacingAfter(0).setSpacingBefore(0);
-      p.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
-      try { p.setWordBreak(DocumentApp.WordBreak.NORMAL); } catch (_) {}
+      inventoryTotalValue.textContent = `Valor Total (Filtrado): ${formatCurrency(totalValue)}`;
     }
-    for (let r = 1; r < table.getNumRows(); r++) {
-      const row = table.getRow(r);
-      for (let c = 0; c < row.getNumCells(); c++) {
-        const cell = row.getCell(c);
-        const p = cell.getChild(0).asParagraph();
-        p.setFontSize(7).setSpacingAfter(0).setSpacingBefore(0);
-        try { p.setWordBreak(DocumentApp.WordBreak.NORMAL); } catch (_) {}
+    
+    function applyFiltersAndSearch() {
+      const query = searchInput.value.toLowerCase().trim()
+                      .normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+      const filtros = {
+        id: document.getElementById('idFiltro').value.trim(),
+        dataInicio: document.getElementById('dataInicio').value ? new Date(document.getElementById('dataInicio').value) : null,
+        dataFim: document.getElementById('dataFim').value ? new Date(document.getElementById('dataFim').value) : null,
+        categoria: document.getElementById('categoriaFiltro').value, 
+        setor: document.getElementById('setorFiltro').value, 
+        responsavel: document.getElementById('responsavelFiltro').value.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,""),
+        status: document.getElementById('statusFiltro').value, 
+        valorMin: document.getElementById('valorMin').value ? parseFloat(document.getElementById('valorMin').value) : null,
+        valorMax: document.getElementById('valorMax').value ? parseFloat(document.getElementById('valorMax').value) : null,
+      };
+      
+      function parseDateFromCache(str) {
+        if (!str) return null;
+        const [ano, mes, dia] = str.split("-");
+        if (!dia || !mes || !ano) return null;
+        return new Date(+ano, +mes - 1, +dia);
       }
-    }
-    const total = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalValue);
-    const totalLine = body.appendParagraph(`\nValor Total (Filtrado): ${total}`);
-    totalLine.setFontSize(9).setBold(true);
-    doc.saveAndClose();
-    const pdfBlob = doc.getAs('application/pdf');
-    const pdfFile = folder.createFile(pdfBlob).setName(`${docName}.pdf`);
-    DriveApp.getFileById(doc.getId()).setTrashed(true);
-    pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    return { success: true, message: "Relatório PDF gerado com sucesso!", url: pdfFile.getUrl() };
-  } catch (e) {
-    return { success: false, message: `Erro ao gerar PDF: ${e.message}` };
-  }
-}
+      
+      const filtrados = allItemsData.filter(item => {
+        const itemCategoria = (item.categoria || "").toString(); 
+        const itemResponsavel = (item.responsavel || "").toString().trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+        const itemSetor = (item.setor || "").toString();
+        const itemStatus = (item["status do produto"] || "").toString();
+        const valor = parseCurrency(item["valor unitario"]) || 0;
+        const dataEntrada = parseDateFromCache(item["data de entrada"]);
 
-//função para buscar o histórico pelo id do patrimonio
-function getHistoryByPatrimonyId(patrimonyId) {
-  try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Historico");
-    if (!sheet) return { success: false, message: "Aba 'Historico' não encontrada." };
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0].map(h => h.toString().toLowerCase().trim().normalize("NFD")
-                 .replace(/[\u0300-\u036f]/g, ""));
-    const idPatrimonioIndex = headers.indexOf("id");
-    if (idPatrimonioIndex === -1) return { success: false, message: "Coluna 'ID' não encontrada na aba Histórico." };
-    const historyRecords = [];
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][idPatrimonioIndex] && data[i][idPatrimonioIndex].toString() == patrimonyId.toString()) {
-        const record = {};
-        headers.forEach((h, index) => {
-          let cellValue = data[i][index];
-          if (cellValue instanceof Date) {
-            cellValue = Utilities.formatDate(cellValue, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm");
+        const matchID = !filtros.id || (item.id && item.id.toString() === filtros.id);
+        const matchCategoria = !filtros.categoria || itemCategoria === filtros.categoria; 
+        const matchResponsavel = !filtros.responsavel || itemResponsavel.includes(filtros.responsavel);
+        const matchSetor = !filtros.setor || itemSetor === filtros.setor;
+        const matchStatus = !filtros.status || itemStatus === filtros.status;
+        const matchValor = (!filtros.valorMin || valor >= filtros.valorMin) && (!filtros.valorMax || valor <= filtros.valorMax);
+        let matchData = true;
+        if (filtros.dataInicio || filtros.dataFim) {
+          if (!dataEntrada) matchData = false;
+          else {
+            if (filtros.dataInicio && dataEntrada < filtros.dataInicio) matchData = false;
+            if (filtros.dataFim && dataEntrada > filtros.dataFim) matchData = false;
           }
-          record[h] = cellValue;
+        }
+        
+        const matchFiltros = matchID && matchCategoria && matchResponsavel && matchSetor && matchStatus && matchValor && matchData;
+        if (!matchFiltros) return false;
+
+        if (query === '') return true;
+        return Object.values(item).some(val => 
+            val && val.toString().toLowerCase()
+            .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+            .includes(query)
+        );
+      });
+
+      currentFilteredData = filtrados;
+      renderItemsTable(filtrados);
+    }
+    
+    searchInput.addEventListener('keyup', applyFiltersAndSearch);
+    filterBtn.onclick = () => {
+      populateFilterOptions(); 
+      filterModal.classList.remove('hidden');
+    } 
+    cancelFilterBtn.onclick = () => filterModal.classList.add('hidden');
+    clearFilterBtn.onclick = () => {
+      filterForm.reset();
+      applyFiltersAndSearch();
+    }
+    filterForm.onsubmit = (ev) => {
+      ev.preventDefault();
+      filterModal.classList.add('hidden');
+      applyFiltersAndSearch();
+    };
+    
+    printPdfBtn.onclick = () => {
+      showInfoModal("Gerando relatório PDF...");
+      server.withSuccessHandler(response => {
+        if(response.success) {
+          showInfoModal(`Relatório PDF gerado! Um link será aberto.`);
+          window.open(response.url, '_blank'); 
+        } else {
+          showInfoModal(`Erro ao gerar PDF: ${response.message}`);
+        }
+      }).generatePdfReport(currentFilteredData, TABLE_COLUMNS, document.querySelector('header img')?.src || document.querySelector('#loginScreen img')?.src || '');
+    };
+
+    
+    function initializeViews() {
+    }
+
+
+    function populateForm(item) { 
+      const isEditing = !!item;
+      formTitle.textContent = isEditing ? 'Editar Item' : 'Adicionar Novo Item';
+      
+      itemForm.reset(); 
+      itemIdInput.value = isEditing ? item.id : '';
+
+      populateDropdown('item-categoria', dropdownOptions.categorias); 
+      populateDropdown('item-setor', dropdownOptions.setores); 
+      populateDropdown('item-statusdoproduto', dropdownOptions.statusProduto); 
+
+      const categoriaSelect = document.getElementById('item-categoria');
+      if (categoriaSelect) {
+         categoriaSelect.disabled = isEditing; 
+      }
+
+      if (isEditing) {
+        if (categoriaSelect) categoriaSelect.value = item.categoria || ''; 
+        document.getElementById('item-nome').value = item.nome || '';
+        document.getElementById('item-responsavel').value = item.responsavel || '';
+        document.getElementById('item-setor').value = item.setor || ''; 
+        document.getElementById('item-statusdoproduto').value = item['status do produto'] || ''; 
+        document.getElementById('item-patrimonio').value = item.patrimonio || '';
+        document.getElementById('item-datadeentrada').value = item['data de entrada'] || '';
+        if (item['valor unitario']) {
+          const cents = Math.round(parseCurrency(item['valor unitario']) * 100);
+          document.getElementById('item-valorunitario').value = formatInputToBRReal(String(cents));
+        } else {
+          document.getElementById('item-valorunitario').value = '';
+        }
+      } else {
+         document.getElementById('item-statusdoproduto').value = dropdownOptions.statusProduto.includes('Novo') ? 'Novo' : (dropdownOptions.statusProduto[0] || '');
+        document.getElementById('item-datadeentrada').value = new Date().toISOString().split('T')[0];
+      }
+      
+      itemFormModal.style.display = 'flex';
+    }
+    
+    function setupDashboard() {
+        if(allItemsData.length > 0) {
+            populateDashboardFilters();
+            renderSummaryCards(allItemsData); 
+            renderAllCharts(allItemsData);
+        } else {
+            dashboardCharts.innerHTML = '<p class="text-center col-span-full">Carregando dados...</p>';
+            server.withSuccessHandler(response => {
+                if (response.success) {
+                    allItemsData = response.data;
+                    populateDashboardFilters(); 
+                    renderSummaryCards(allItemsData);
+                    renderAllCharts(allItemsData);
+                } else {
+                    dashboardCharts.innerHTML = `<p class="text-center col-span-full text-red-500">Erro: ${response.message}</p>`;
+                }
+            }).getDashboardData();
+        }
+    }
+    
+    function populateDashboardFilters() { 
+        const filtersContainer = document.getElementById('dashboardFilters');
+        
+        const setores = dropdownOptions.setores; 
+        const statuses = dropdownOptions.statusProduto; 
+        const categories = dropdownOptions.categorias; 
+
+        filtersContainer.innerHTML = `
+            <div>
+                <label for="filterSetorDash" class="text-sm font-medium text-gray-700">Setor</label>
+                <select id="filterSetorDash" class="filter-input w-full mt-1 border border-gray-300 rounded-md p-2">
+                    <option value="">Todos</option>
+                    ${setores.map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>
+            </div>
+            <div>
+                <label for="filterCategoryDash" class="text-sm font-medium text-gray-700">Categoria</label>
+                <select id="filterCategoryDash" class="filter-input w-full mt-1 border border-gray-300 rounded-md p-2">
+                    <option value="">Todas</option>
+                    ${categories.map(c => `<option value="${c}">${c}</option>`).join('')}
+                </select>
+            </div>
+            <div>
+                <label for="filterStatusDash" class="text-sm font-medium text-gray-700">Status</label>
+                <select id="filterStatusDash" class="filter-input w-full mt-1 border border-gray-300 rounded-md p-2">
+                    <option value="">Todos</option>
+                    ${statuses.map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>
+            </div>
+        `;
+        document.querySelectorAll('.filter-input').forEach(el => el.addEventListener('change', applyDashboardFilters));
+    }
+    
+    function applyDashboardFilters() {
+        const filterSetor = document.getElementById('filterSetorDash')?.value;
+        const filterStatus = document.getElementById('filterStatusDash')?.value;
+        const filterCategory = document.getElementById('filterCategoryDash')?.value;
+        const filteredData = allItemsData.filter(item => {
+            const setorMatch = !filterSetor || item['setor'] === filterSetor;
+            const statusMatch = !filterStatus || item['status do produto'] === filterStatus;
+            const categoryMatch = !filterCategory || item['categoria'] === filterCategory;
+            return setorMatch && statusMatch && categoryMatch;
         });
-        historyRecords.push(record);
+        renderSummaryCards(filteredData);
+        renderAllCharts(filteredData);
+    }
+    function renderAllCharts(data) {
+        dashboardCharts.innerHTML = `
+            <div class="bg-white p-4 rounded-lg shadow-panel"><canvas id="setorChart"></canvas></div>
+            <div class="bg-white p-4 rounded-lg shadow-panel"><canvas id="categoryChart"></canvas></div>
+            <div class="bg-white p-4 rounded-lg shadow-panel"><canvas id="statusChart"></canvas></div>
+            <div class="bg-white p-4 rounded-lg shadow-panel"><canvas id="nameChart"></canvas></div>`;
+        renderChart('setorChart', 'Itens por Setor', 'setor', data, 'pie');
+        renderChart('categoryChart', 'Itens por Categoria', 'categoria', data, 'doughnut');
+        renderChart('statusChart', 'Itens por Status', 'status do produto', data, 'pie');
+        renderChart('nameChart', 'Top 5 Nomes de Itens', 'nome', data, 'bar', 5);
+    }
+
+   
+    function populateFilterOptions() { 
+      populateDropdown("categoriaFiltro", dropdownOptions.categorias); 
+      populateDropdown("setorFiltro", dropdownOptions.setores); 
+      populateDropdown("statusFiltro", dropdownOptions.statusProduto); 
+    
+      document.getElementById("idFiltro").value = "";
+      document.getElementById("dataInicio").value = "";
+      document.getElementById("dataFim").value = "";
+      document.getElementById("responsavelFiltro").value = "";
+      document.getElementById("valorMin").value = "";
+      document.getElementById("valorMax").value = "";
+    }
+    
+    function renderChart(canvasId, title, key, data, type, topN = null) {
+        if (charts[canvasId]) charts[canvasId].destroy();
+        const ctx = document.getElementById(canvasId).getContext('2d');
+        const counts = data.reduce((acc, item) => {
+            let value = item[key] || 'Não preenchido';
+            acc[value] = (acc[value] || 0) + 1;
+            return acc;
+        }, {});
+        let sortedData = Object.entries(counts).sort(([,a],[,b]) => b-a);
+        if (topN) sortedData = sortedData.slice(0, topN);
+        const labels = sortedData.map(([label]) => label);
+        const values = sortedData.map(([,value]) => value);
+        charts[canvasId] = new Chart(ctx, {
+            type: type,
+            data: { labels: labels, datasets: [{ label: title, data: values,
+                backgroundColor: ['#e70607', '#d9d9d9', '#a9a9a9', '#808080', '#555555', '#333333', '#FF6384', '#36A2EB', '#FFCE56'],
+                borderColor: '#ffffff', borderWidth: type === 'line' ? 2 : 1,
+            }]},
+            options: { responsive: true, plugins: {
+                title: { display: true, text: title, font: { size: 16 } },
+                legend: { position: type.includes('pie') || type.includes('doughnut') ? 'top' : 'bottom' },
+                datalabels: {
+                  display: true,
+                  color: (type === 'bar' || type === 'line') ? '#333' : '#fff',
+                  anchor: 'end', align: 'end',
+                  offset: type.includes('pie') ? 20 : 5,
+                  font: { weight: 'bold', size: 12 },
+                  formatter: (value) => value > 0 ? value : null
+                }
+            }}
+        });
+    }
+
+    loginBtn.addEventListener('click', () => {
+      const email = emailInput.value;
+      const password = passwordInput.value;
+      if (!email || !password) {
+        loginMessage.textContent = 'Por favor, preencha o e-mail e a senha.';
+        return;
+      }
+      loginMessage.textContent = 'Autenticando...';
+      loginBtn.disabled = true;
+
+      server.withSuccessHandler(response => {
+          loginBtn.disabled = false;
+          if (response.success) {
+            currentUserEmail = email; 
+            initializeApp(response.role);
+          } else loginMessage.textContent = response.message;
+        })
+        .withFailureHandler(err => {
+          loginMessage.textContent = 'Erro de comunicação. Tente novamente.';
+          loginBtn.disabled = false;
+        })
+        .handleLogin(email, password);
+    });
+
+    logoutBtn.addEventListener('click', () => {
+      mainContent.classList.add('hidden');
+      patrimonioView.style.display = 'block';
+      dashboardView.classList.add('hidden');
+      loginScreen.style.display = 'flex';
+      emailInput.value = passwordInput.value = '';
+      loginMessage.textContent = '';
+      currentUserRole = '';
+      currentUserEmail = '';
+      editorActions.classList.add('hidden');
+      allItemsData = [];
+      currentFilteredData = [];
+      itemsTableBody.innerHTML = '';
+      noItemsMessage.classList.add('hidden');
+      searchInput.value = '';
+      
+      if (pollingInterval) clearInterval(pollingInterval); 
+      statusIndicator.classList.remove('bg-red-500', 'bg-green-500', 'animate-pulse'); 
+      statusIndicator.classList.add('bg-gray-400'); 
+      statusText.textContent = 'Desconectado'; 
+      manualRefreshBtn.classList.add('hidden'); 
+    });
+    
+    navigation.addEventListener('click', e => {
+        const clickedButton = e.target.closest('.nav-btn');
+        if(clickedButton) {
+            const view = clickedButton.dataset.view;
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('bg-[#e70607]', 'text-white');
+                btn.classList.add('bg-transparent', 'text-gray-600', 'hover:bg-gray-100');
+            });
+            clickedButton.classList.add('bg-[#e70607]', 'text-white');
+            clickedButton.classList.remove('bg-transparent', 'text-gray-600', 'hover:bg-gray-100');
+            if(view === 'dashboard') {
+                patrimonioView.style.display = 'none';
+                dashboardView.classList.remove('hidden');
+                setupDashboard();
+            } else {
+                patrimonioView.style.display = 'block';
+                dashboardView.classList.add('hidden');
+            }
+        }
+    });
+
+
+    addItemBtn.addEventListener('click', () => {
+      populateForm(null); 
+    });
+    
+    cancelFormBtn.addEventListener('click', () => {
+      itemFormModal.style.display = 'none';
+      const id = itemIdInput.value;
+      if (id) {
+        server.withSuccessHandler(() => {}).releaseEditLock(id, currentUserEmail); 
+      }
+      isEditing = false; 
+      itemForm.reset();
+    });
+
+    itemForm.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const btn = itemForm.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      btn.textContent = 'Salvando...';
+
+      const isEditingItem = !!itemIdInput.value; 
+      const item = {
+        id: isEditingItem ? itemIdInput.value : null
+      };
+      
+      item.categoria = document.getElementById('item-categoria').value; 
+      item.nome = document.getElementById('item-nome').value;
+      item.responsavel = document.getElementById('item-responsavel').value;
+      item.setor = document.getElementById('item-setor').value;
+      item['status do produto'] = document.getElementById('item-statusdoproduto').value;
+      item.patrimonio = document.getElementById('item-patrimonio').value;
+      item['data de entrada'] = document.getElementById('item-datadeentrada').value;
+      const rawValor = document.getElementById('item-valorunitario').value || '';
+      let normalizedValor = rawValor.replace(/\./g, '').replace(',', '.');
+      if (normalizedValor === '') normalizedValor = '0'; 
+      item['valor unitario'] = normalizedValor;
+
+      if (!item.categoria || !item.nome) {
+        alert("Categoria e Nome são obrigatórios.");
+        btn.disabled = false;
+        btn.textContent = 'Salvar';
+        return;
+      }
+      
+      const action = isEditingItem ? 'editItem' : 'addItem';
+      
+      const callback = (res) => {
+        btn.disabled = false;
+        btn.textContent = 'Salvar';
+        if (res.success) {
+          itemFormModal.style.display = 'none';
+          showInfoModal(`O item "${item.nome}" foi ${isEditingItem ? 'atualizado' : 'adicionado'}!`);
+          
+          if (isEditingItem) {
+            server.withSuccessHandler(() => {}).releaseEditLock(item.id, currentUserEmail); 
+            isEditing = false; 
+          }
+          
+          itemForm.reset();
+          loadInitialInventory(true); 
+
+        } else {
+          showInfoModal('Erro: ' + res.message); 
+        }
+      };
+
+      if (action === 'editItem') {
+        server.withSuccessHandler(callback).editItem(item, currentUserEmail);
+      } else {
+        server.withSuccessHandler(callback).addItem(item, currentUserEmail); 
+      }
+    });
+    
+    const valorInput = document.getElementById('item-valorunitario');
+    if (valorInput) {
+      valorInput.addEventListener('input', (e) => {
+        const onlyDigits = e.target.value.replace(/[^0-9]/g, '');
+        if (onlyDigits === '') { e.target.value = ''; return; }
+        e.target.value = formatInputToBRReal(onlyDigits);
+      });
+    }
+
+    itemsTableBody.addEventListener('click', e => {
+      const target = e.target;
+      const id = target.dataset.id;
+      
+      if (!id) return;
+
+      if (target.classList.contains('edit-btn')) {
+        
+        if (isEditing) { 
+          showInfoModal('Você já está editando outro item. Salve ou cancele para poder editar este.');
+          return; // Para a execução aqui
+        }
+
+        target.textContent = 'Verificando...';
+        target.disabled = true;
+
+        server.withSuccessHandler(lockResponse => { 
+          if (lockResponse.success) { // Se SIM, o lock foi adquirido
+            target.textContent = 'Carregando...';
+            server.withSuccessHandler(r => {
+              target.textContent = 'Editar';
+              target.disabled = false;
+              if (r.success) {
+                isEditing = true; 
+                populateForm(r.item); 
+              }
+              else alert('Erro ao buscar item: ' + r.message);
+            }).getItemById(id);
+          } else { 
+            target.textContent = 'Editar';
+            target.disabled = false;
+            showInfoModal(lockResponse.message); 
+          }
+        }).acquireEditLock(id, currentUserEmail); 
+      }
+      
+      if (target.classList.contains('delete-btn')) {
+        if (isEditing) {
+          showInfoModal('Você não pode excluir um item enquanto edita outro. Salve ou cancele a edição primeiro.');
+          return;
+        }
+
+        confirmMessage.textContent = 'Deseja realmente excluir este item? (ID: ' + id + ')';
+        confirmModal.style.display = 'flex';
+        confirmYesBtn.onclick = () => {
+          confirmModal.style.display = 'none';
+          server.withSuccessHandler(r => { 
+            if (r.success) {
+              showInfoModal("Item excluído com sucesso.");
+              loadInitialInventory(true); 
+            } else {
+              alert(r.message);
+            }
+          }).deleteItem(id, currentUserEmail); 
+        };
+        confirmNoBtn.onclick = () => confirmModal.style.display = 'none';
+      }
+      
+      if (target.classList.contains('history-btn')) {
+        openHistoryModal(id);
+      }
+    });
+
+
+    function openHistoryModal(id) {
+      historyModalContent.innerHTML = '<p class="text-center text-gray-500">Carregando histórico...</p>';
+      historyModal.style.display = 'flex';
+      historyForm.classList.add('hidden');
+      historyForm.reset();
+      historyPatrimonyId.value = id; 
+      const now = new Date();
+      now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+      document.getElementById('historyData').value = now.toISOString().slice(0, 16);
+      const histResp = document.getElementById('historyResponsavel');
+      if (histResp) histResp.value = currentUserEmail || histResp.value || '';
+      server.withSuccessHandler(response => {
+          historyModalContent.innerHTML = '';
+          if (response.success) {
+            if (response.history && response.history.length > 0) {
+              historyModalContent.innerHTML = '';
+              response.history.forEach(renderHistoryItemInModal);
+            } else {
+              historyModalContent.innerHTML = '<p class="text-center text-gray-500">Nenhum registro de histórico para este item.</p>';
+            }
+          } else {
+            historyModalContent.innerHTML = `<p class="text-red-500">Erro: ${response.message}</p>`;
+          }
+        })
+        .getHistoryByPatrimonyId(id);
+    }
+    function renderHistoryItemInModal(item) {
+      const tipoEvento = item['tipo de evento'] || 'Evento';
+      const descricao = item.descricao || 'Sem descrição';
+      const responsavel = item.responsavel || 'Não informado';
+      const data = item.data || 'Data não informada';
+      let custoFormatado = formatCurrency(parseCurrency(item.custo));
+      const isEdit = tipoEvento.toLowerCase() === 'edição';
+      const bgColor = isEdit ? 'bg-blue-50' : 'bg-white';
+      const itemDiv = document.createElement('div');
+      itemDiv.className = `p-4 border rounded-lg ${bgColor} shadow-sm flex flex-col`;
+      itemDiv.innerHTML = `
+        <div class="flex-grow">
+          <h3 class="text-base font-bold text-gray-800">${tipoEvento}</h3>
+          <div class="mt-2 pl-2 border-l-2 border-gray-200 space-y-1 text-sm">
+            <div class="text-gray-700">
+              <b class="font-semibold">Descrição:</b>
+              ${ 
+                isEdit ? 
+                descricao.split(';').map(d => `<span class="block ml-2">- ${d.trim()}</span>`).join('') :
+                ` ${descricao}`
+              }
+            </div>
+            <p class="text-gray-700"><b class="font-semibold">Responsável:</b> ${responsavel}</p>
+            ${ tipoEvento !== 'Edição' ? `<p class="text-gray-700"><b class="font-semibold">Custo:</b> ${custoFormatado}</p>` : '' }
+          </div>
+        </div>
+        <div class="text-right mt-3">
+          <span class="text-xs font-semibold text-gray-500">${data}</span>
+        </div>
+      `;
+      historyModalContent.prepend(itemDiv);
+    }
+    showHistoryFormBtn.addEventListener('click', () => {
+      historyForm.classList.toggle('hidden');
+      const histResp = document.getElementById('historyResponsavel');
+      if (!histResp) return;
+      if (!histResp.value) histResp.value = currentUserEmail || '';
+    });
+    cancelHistoryFormBtn.addEventListener('click', () => {
+      historyForm.classList.add('hidden');
+      historyForm.reset();
+    });
+    
+    historyForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const btn = historyForm.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      btn.textContent = 'Salvando...';
+      const entryData = {
+        id: historyPatrimonyId.value,
+        data: document.getElementById('historyData').value,
+        tipo: document.getElementById('historyTipo').value,
+        descricao: document.getElementById('historyDescricao').value,
+        custo: document.getElementById('historyCusto').value,
+        responsavel: document.getElementById('historyResponsavel').value 
+      };
+      if (!entryData.id || !entryData.data || !entryData.tipo) {
+        alert("ID, Data e Tipo são obrigatórios.");
+        btn.disabled = false;
+        btn.textContent = 'Salvar';
+        return;
+      }
+      server.withSuccessHandler(response => { 
+        btn.disabled = false;
+        btn.textContent = 'Salvar';
+        if (response.success) {
+          showInfoModal('Movimentação salva com sucesso!');
+          historyForm.reset();
+          historyForm.classList.add('hidden');
+          openHistoryModal(entryData.id); 
+        } else {
+          alert('Erro ao salvar: ' + response.message);
+        }
+      }).addHistoryEntry(entryData, currentUserEmail); //
+    });
+    
+    closeHistoryModalBtn.addEventListener('click', () => historyModal.style.display = 'none');
+    historyModal.addEventListener('click', e => {
+        if (e.target === historyModal) historyModal.style.display = 'none';
+    });
+
+
+    
+    function setupUIForRole(role) {
+      if (!editorActions) return;
+      if (role === 'Leitor') {
+        editorActions.classList.add('hidden');
+      } else {
+        editorActions.classList.remove('hidden');
       }
     }
-    historyRecords.sort((a, b) => {
-        const partsA = a.data.split(' ')[0].split('/');
-        const dateA = new Date(+partsA[2], partsA[1] - 1, +partsA[0]);
-        const partsB = b.data.split(' ')[0].split('/');
-        const dateB = new Date(+partsB[2], partsB[1] - 1, +partsB[0]);
-        return dateB - dateA;
-    });
-    return { success: true, history: historyRecords };
-  } catch (e) {
-    return { success: false, message: e.message };
-  }
-}
 
-//função para adicionar entrada no histórico
-function addHistoryEntry(entryData, userEmail) { 
-  const emailToLog = userEmail || entryData.responsavel; 
-  Logger.log(`addHistoryEntry: Iniciado por ${emailToLog} para item ${entryData.id}`); //
-  try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Historico");
-    if (!sheet) return { success: false, message: "Aba 'Historico' não encontrada." };
+    manualRefreshBtn.addEventListener('click', () => { 
+      statusText.textContent = "Atualizando..."; 
+      manualRefreshBtn.classList.add('hidden'); 
+      manualRefreshBtn.disabled = true; 
+      
+      loadInitialInventory(true, () => { 
+         server.withSuccessHandler(resetResponse => { 
+            if(resetResponse.success) { 
+               checkDirtyFlag(); 
+               if (pollingInterval) clearInterval(pollingInterval); 
+               pollingInterval = setInterval(checkDirtyFlag, 15000); 
+            } else {
+               statusText.textContent = "Erro ao resetar"; 
+               manualRefreshBtn.classList.remove('hidden'); 
+               manualRefreshBtn.disabled = false; 
+            }
+         }).resetDirtyFlag(); 
+      });
+    });
+
+    function checkDirtyFlag() { 
+        if (itemFormModal.style.display === 'flex' || infoModal.style.display === 'flex' || confirmModal.style.display === 'flex' || isEditing) {
+          return; 
+        }
+        
+        server.withSuccessHandler(result => { 
+            statusIndicator.classList.remove('animate-pulse', 'bg-gray-400'); 
+            
+            if (result.status == 1 && result.lastEditor !== currentUserEmail) { 
+                statusIndicator.classList.remove('bg-green-500'); 
+                statusIndicator.classList.add('bg-red-500'); 
+                statusText.textContent = "Desatualizado"; 
+                manualRefreshBtn.classList.remove('hidden'); 
+                manualRefreshBtn.disabled = false; 
+                
+                if (pollingInterval) clearInterval(pollingInterval); 
+
+            } else {
+                statusIndicator.classList.remove('bg-red-500'); 
+                statusIndicator.classList.add('bg-green-500'); 
+                statusText.textContent = "Atualizado"; 
+                manualRefreshBtn.classList.add('hidden'); 
+                manualRefreshBtn.disabled = true; 
+            }
+        }).getDirtyFlagStatus(); 
+    }
+
+     function loadDropdownOptions(callback) { 
+        server.withSuccessHandler(response => {
+           if (response.success) {
+              dropdownOptions = response.options; 
+           } else {
+              console.error("Erro ao carregar opções de dropdown:", response.message);
+              showInfoModal("Erro ao carregar opções dos menus. Verifique a aba 'Status'.");
+              dropdownOptions = { categorias: [], setores: [], statusProduto: [] };
+           }
+           if (callback) callback();
+        }).getDropdownOptions(); 
+     }
+
+
+    function loadInitialInventory(forceReload = false, callbackOnSuccess = null) { 
+      noItemsMessage.textContent = 'Carregando inventário completo...';
+      noItemsMessage.classList.remove('hidden');
+      itemsList.classList.add('hidden');
+
+      server.withSuccessHandler(response => {
+        if (response.success) {
+          allItemsData = response.data;
+          applyFiltersAndSearch();
+          populateFilterOptions(); 
+          
+          if (callbackOnSuccess) { 
+             callbackOnSuccess(); 
+          } else {
+             checkDirtyFlag(); 
+          }
+          
+        } else {
+          noItemsMessage.textContent = 'Erro ao carregar inventário: ' + response.message;
+          checkDirtyFlag(); 
+        }
+      }).getDashboardData(forceReload);
+    }
+
+
+    function initializeApp(role) { 
+      currentUserRole = role;
+      userRoleSpan.textContent = currentUserRole;
+      setupUIForRole(currentUserRole);
+      loginScreen.style.display = 'none';
+      mainContent.classList.remove('hidden');
+      initializeViews();
+
+      loadDropdownOptions(() => { 
+         loadInitialInventory(); 
+         
+         if (pollingInterval) clearInterval(pollingInterval); 
+         pollingInterval = setInterval(checkDirtyFlag, 15000); 
+      });
+    }
     
-    const newRow = [
-      entryData.id,
-      new Date(entryData.data),
-      entryData.tipo,
-      entryData.descricao,
-      entryData.custo || 0, 
-      emailToLog 
-    ];
+    function renderSummaryCards(data) {
+      const summaryContainer = document.getElementById('dashboardSummaryCards');
+      if (!summaryContainer) return;
+      const activeItems = data.filter(item => 
+        item['status do produto']?.toLowerCase() !== 'desativado'
+      );
+      const countsByCategory = activeItems.reduce((acc, item) => {
+        const category = item['categoria'];
+        if (category) {
+          acc[category] = (acc[category] || 0) + 1;
+        }
+        return acc;
+      }, {});
+      const totalValue = activeItems.reduce((sum, item) => {
+        return sum + parseCurrency(item['valor unitario']);
+      }, 0);
+      const categoriesInFilter = [...new Set(data.map(item => item['categoria']))].filter(Boolean);
+      let cardsHtml = '';
+      const mainCategories = ["TI", "Mobiliário", "Equipamentos Eletrônicos"];
+      mainCategories.forEach(categoryName => {
+        const count = countsByCategory[categoryName] || 0;
+        cardsHtml += `
+          <div class="bg-white p-4 rounded-lg shadow-panel text-center">
+            <h4 class="text-gray-500 text-sm font-medium">Total de ${categoryName}</h4>
+            <p class="text-3xl font-bold text-[#e70607] mt-1">${count}</p>
+          </div>
+        `;
+      });
+      cardsHtml += `
+        <div class="bg-white p-4 rounded-lg shadow-panel text-center">
+          <h4 class="text-gray-500 text-sm font-medium">Valor Total (Ativo/Filtrado)</h4>
+          <p class="text-3xl font-bold text-green-600 mt-1">${formatCurrency(totalValue)}</p>
+        </div>
+      `;
+      summaryContainer.innerHTML = cardsHtml;
+    }
     
-    sheet.appendRow(newRow);
-    _setDirtyFlag(emailToLog); 
-    return { success: true, message: "Registro de histórico adicionado com sucesso." };
-  } catch (e) {
-    Logger.log(`Erro em addHistoryEntry: ${e.message}`); 
-    return { success: false, message: `Erro ao adicionar histórico: ${e.message}` };
-  }
-}
+    const reloadDashboardBtn = document.getElementById('reloadDashboardBtn');
+    if (reloadDashboardBtn) {
+      reloadDashboardBtn.addEventListener('click', () => {
+        reloadDashboardBtn.disabled = true;
+        reloadDashboardBtn.textContent = 'Atualizando...';
+        server.withSuccessHandler(() => {
+            loadDropdownOptions(() => {
+              loadInitialInventory(true, () => {
+                server.withSuccessHandler(resetResponse => {
+                    if(resetResponse.success) { 
+                      checkDirtyFlag(); 
+                      if (pollingInterval) clearInterval(pollingInterval);
+                      pollingInterval = setInterval(checkDirtyFlag, 15000);
+                    }
+                }).resetDirtyFlag();
+              }); 
+              setupDashboard();
+              reloadDashboardBtn.disabled = false;
+              reloadDashboardBtn.textContent = 'Atualizar';
+            });
+          })
+          .clearDashboardCache();
+      });
+    }
+
+});
+</script>
+</body>
+</html>
